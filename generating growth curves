@@ -1,1 +1,130 @@
+#for making the growth curves
 
+setwd("set working directory")
+
+
+library(tidyr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(growthcurver)
+library(purrr)
+library(growthrates)
+library(scales)
+
+
+formateAD <- read.csv("file.csv")              #OR
+formateAD <- read.csv2("file.csv",
+                       stringsAsFactors = FALSE)
+
+
+formateAD[,-1] <- lapply(formateAD[,-1], function(x) {
+  as.numeric(gsub(",", ".", x))
+})
+
+colnames(formateAD)[1] <- "time"      #to set colum names
+
+formateAD$time <- as.numeric(gsub(",", ".", formateAD$time))
+
+formateAD_long <- formateAD %>%
+  pivot_longer(
+    cols = -time,
+    names_to = "rep_treat",
+    values_to = "value"
+  ) %>%
+  mutate(
+    replicate = substr(rep_treat, 1, 1),
+    treatment = as.integer(substr(rep_treat, 2, nchar(rep_treat)))
+  ) %>%
+  select(-rep_treat)
+
+formateAD_long <- formateAD_long %>%    #to correct for the OD600
+  mutate(value = value / 0.23)
+
+sapply(formateAD[,-1], is.numeric)
+
+formateAD_long <- formateAD_long %>%   #time in hours
+  mutate(time_h = time / 3600)
+
+data_noA <- formateAD_long %>%
+  filter(replicate != "A", replicate != "H")    #removing rows A and H due to insufficient CO2 levels
+
+
+growth_stats_clean <- data_noA %>%
+  group_by(treatment, time_h) %>%
+  summarise(
+    mean = mean(value, na.rm = TRUE),
+    sd   = sd(value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+growth_stats_clean<-growth_stats_clean%>%    #to make the legend 
+  mutate(
+    treatment = recode(
+      treatment,
+      "1"  = "0 ng/mL aTc",
+      "2"  = "0.01 ng/mL aTc",
+      "3"  = "0.02 ng/mL aTc",
+      "4"  = "0.04 ng/mL aTc",
+      "5"  = "0.08 ng/mL aTc",
+      "6"  = "0.16 ng/mL aTc",
+      "7"  = "0.31 ng/mL aTc",
+      "8"  = "0.63 ng/mL aTc",
+      "9"  = "1.25 ng/mL aTc",
+      "10" = "2.5 ng/mL aTc",
+      "11" = "SerAux",
+      "12" = "pZASS:C:cnMDH"  ) )
+
+growth_stats_clean$treatment <- factor(
+  growth_stats_clean$treatment,
+  levels = unique(growth_stats_clean$treatment)
+)
+
+
+n_trt <- nlevels(growth_stats_clean$treatment)
+
+special_cols <- c( "pZASS:C:cnMDH"        = "#d10a1b",           #to change the colours of specific conditions
+                   "SerAux"  = "#0a28d1")
+
+trt_levels <- levels(growth_stats_clean$treatment)
+regular_trt <- setdiff(trt_levels, names(special_cols))
+
+purply_tones <- colorRampPalette(                     #to choose colours for the "normal" conditions
+  c("#ebd9ff", "#3F0E80"))(length(regular_trt))
+
+
+all_colors <- c(
+  setNames(purply_tones, regular_trt),
+  special_cols
+
+  
+  
+  ggplot(growth_stats_clean,             #to put together the final plot
+         aes(x = time_h, y = mean,
+             color = treatment,
+             fill  = treatment,
+             group = treatment)) +
+    geom_ribbon(
+      aes(ymin = mean - sd, ymax = mean + sd),
+      alpha = 0.25,
+      color = NA
+    ) +
+    geom_line(size = 1) +
+    scale_color_manual(values = all_colors) +
+    scale_fill_manual(values = all_colors) +
+    guides(fill = "none") +
+    labs(
+      x = "Time (hours)",
+      y = "OD600",
+      color = "Treatment"
+    ) +
+    theme_classic() +
+    
+    scale_y_log10()+
+    coord_cartesian(ylim = c(0.2, NA), xlim = c(NA, NA))   +
+    labs(
+      color = NULL,
+      fill  = NULL) +
+    
+    scale_x_continuous(
+      breaks = seq(0, max(growth_stats_clean$time_h), by = 10)
