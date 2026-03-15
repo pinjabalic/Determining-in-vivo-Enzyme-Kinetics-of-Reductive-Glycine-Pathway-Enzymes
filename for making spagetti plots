@@ -1,0 +1,99 @@
+#for spagettiplots
+
+setwd("set working directory")
+
+
+library(tidyr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(growthcurver)
+library(purrr)
+library(growthrates)
+library(scales)
+
+
+formateAD <- read.csv("file.csv")              #OR
+formateAD <- read.csv2("file.csv",
+                       stringsAsFactors = FALSE)
+
+
+formateAD[,-1] <- lapply(formateAD[,-1], function(x) {
+  as.numeric(gsub(",", ".", x))
+})
+
+colnames(formateAD)[1] <- "time"      #to set colum names
+
+formateAD$time <- as.numeric(gsub(",", ".", formateAD$time))
+
+formateAD_long <- formateAD %>%
+  pivot_longer(
+    cols = -time,
+    names_to = "rep_treat",
+    values_to = "value"
+  ) %>%
+  mutate(
+    replicate = substr(rep_treat, 1, 1),
+    treatment = as.integer(substr(rep_treat, 2, nchar(rep_treat)))
+  ) %>%
+  select(-rep_treat)
+
+formateAD_long <- formateAD_long %>%    #to correct for the OD600
+  mutate(value = value / 0.23)
+
+sapply(formateAD[,-1], is.numeric)
+
+formateAD_long <- formateAD_long %>%   #time in hours
+  mutate(time_h = time / 3600)
+
+data_noA <- formateAD_long %>%
+filter(replicate != "A", replicate != "H")    #removing rows A and H due to insufficient CO2 levels
+
+data_rates<-data_rates%>%        #to name the conditions
+  mutate(
+    treatment = recode(
+      treatment,
+      "1"  = "0 ng/mL aTc",
+      "2"  = "0.08 ng/mL aTc",
+      "3"  = "0.16 ng/mL aTc",
+      "4"  = "0.31 ng/mL aTc",
+      "5"  = "0.63 ng/mL aTc",
+      "6"  = "1.25 ng/mL aTc",
+      "7"  = "2.5 ng/mL aTc",
+      "8"  = "5 ng/mL aTc",
+      "9"  = "10 ng/mL aTc",
+      "10" = "20 ng/mL aTc",
+      "11" = "SerAux",
+      "12" = "SerAux ???glyA"))
+
+data_noA <- data_noA %>%     #to order the conditions
+  mutate(
+    treatment = factor(
+      treatment,
+      levels = c(
+        "0 ng/mL aTc",
+        "0.01 ng/mL aTc",
+        "0.02 ng/mL aTc",
+        "0.04 ng/mL aTc",
+        "0.08 ng/mL aTc",
+        "0.16 ng/mL aTc",
+        "0.31 ng/mL aTc",
+        "0.63 ng/mL aTc",
+        "1.25 ng/mL aTc",
+        "2.5 ng/mL aTc",
+        "SerAux ???glyA",
+        "SerAux"))
+
+
+
+ggplot(data_noA,
+       aes(x = time_h, y = value,
+           group = interaction(treatment, replicate),
+           color = replicate)) +
+  geom_line() +
+  scale_y_log10()+
+  facet_wrap(~ treatment, scales = "fixed") +
+  labs(
+    x = "Time (hours)",
+    y = "OD600") +
+  theme_classic()
