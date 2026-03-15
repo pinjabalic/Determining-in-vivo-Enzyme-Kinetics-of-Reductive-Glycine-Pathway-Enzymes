@@ -1,0 +1,54 @@
+# for bioreactors
+
+library(tidyr)
+library(dplyr)
+
+df_long <- df %>%
+  pivot_longer(
+    cols = -time,              # everything except time
+    names_to = "replica",
+    values_to = "value"
+  )
+
+df_filtered <- df_long %>%
+  group_by(replica) %>%
+  arrange(time) %>%
+  filter(!duplicated(time)) %>%   # removes duplicate times
+  ungroup()
+
+# Check for NA values in the original data
+any(is.na(df_filtered$time))  # True if there are NAs in 'time'
+any(is.na(df_filtered$value))  # True if there are NAs in 'value'
+
+df_filtered <- df_filtered %>%
+  filter(!is.na(time) & !is.na(value))
+
+#to check how many datapoints left in the exponential phase --> helps to set h
+df_counts <- df_filtered %>%
+  filter(time >= 10, time <= 22) %>% #change numbers to correspond with the exponential phase
+  group_by(replica) %>%
+  summarise(n_points = n())
+
+print(df_counts)
+
+df_summary <- df_filtered %>%
+  # Focus on the exponential phase and decide min and max time values
+  filter(time >= 5, time <= 30) %>% 
+  group_by(replica) %>%
+  summarise(
+    fit = list(tryCatch(
+      # h=500, because high noise and a LOT of datapoints
+      fit_easylinear(time, value, h = 500), 
+      error = function(e) NULL
+    )),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    mu = map_dbl(fit, function(x) {
+      if (is.null(x)) return(NA_real_)
+      cf <- coef(x)
+      if ("mumax" %in% names(cf)) cf[["mumax"]] else NA_real_
+    }),
+    doubling_time = log(2) / mu
+  ) %>%
+  select(-fit)
