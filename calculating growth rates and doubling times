@@ -1,0 +1,85 @@
+#for calculating growth rates
+
+setwd("set working directory")
+
+
+library(tidyr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(growthcurver)
+library(purrr)
+library(growthrates)
+library(scales)
+
+
+formateAD <- read.csv("file.csv")              #OR
+formateAD <- read.csv2("file.csv",
+                       stringsAsFactors = FALSE)
+
+
+formateAD[,-1] <- lapply(formateAD[,-1], function(x) {
+  as.numeric(gsub(",", ".", x))
+})
+
+colnames(formateAD)[1] <- "time"      #to set colum names
+
+formateAD$time <- as.numeric(gsub(",", ".", formateAD$time))
+
+formateAD_long <- formateAD %>%
+  pivot_longer(
+    cols = -time,
+    names_to = "rep_treat",
+    values_to = "value"
+  ) %>%
+  mutate(
+    replicate = substr(rep_treat, 1, 1),
+    treatment = as.integer(substr(rep_treat, 2, nchar(rep_treat)))
+  ) %>%
+  select(-rep_treat)
+
+formateAD_long <- formateAD_long %>%    #to correct for the OD600
+  mutate(value = value / 0.23)
+
+sapply(formateAD[,-1], is.numeric)
+
+formateAD_long <- formateAD_long %>%   #time in hours
+  mutate(time_h = time / 3600)
+
+data_noA <- formateAD_long %>%
+  filter(replicate != "A", replicate != "H")    #removing rows A and H due to insufficient CO2 levels
+
+growth_stats_clean <- data_noA %>%
+  group_by(treatment, time_h) %>%
+  summarise(
+    mean = mean(value, na.rm = TRUE),
+    sd   = sd(value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+df_filtered <- data_noA %>%
+  group_by(replicate, treatment) %>%
+  arrange(time_h) %>%
+  filter(!duplicated(time_h)) %>%   # remove duplicate times
+  ungroup()
+
+
+df_summary <- df_filtered%>%
+  filter(treatment != 9, value > 0)  %>% #remove the negative control, have only positive OD values
+  group_by(replicate, treatment) %>%
+  summarise(
+    fit = list(fit_easylinear(time_h, value, h = 10)), # h=number of datapoints in the sliding window
+    mu  = coef(fit[[1]])["mumax"],
+    doubling_time = log(2) / mu,
+    .groups = "drop"
+  ) %>%
+  select(-fit)
+
+
+df_summary_avg <- df_summary %>%
+  group_by(treatment) %>%                  # group by treatment only
+  summarise(
+    avg_doubling_time = mean(doubling_time, na.rm = TRUE),  # average
+    sd_doubling_time  = sd(doubling_time, na.rm = TRUE),    # optional: standard deviation
+    n_replicates      = n()                                   # optional: number of replicates
+  )
