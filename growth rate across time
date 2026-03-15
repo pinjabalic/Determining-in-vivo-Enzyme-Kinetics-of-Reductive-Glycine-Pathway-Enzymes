@@ -1,0 +1,91 @@
+#for plotting growth rates across time
+
+setwd("set working directory")
+
+
+library(tidyr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(growthcurver)
+library(purrr)
+library(growthrates)
+library(scales)
+
+
+formateAD <- read.csv("file.csv")              #OR
+formateAD <- read.csv2("file.csv",
+                       stringsAsFactors = FALSE)
+
+
+formateAD[,-1] <- lapply(formateAD[,-1], function(x) {
+  as.numeric(gsub(",", ".", x))
+})
+
+colnames(formateAD)[1] <- "time"      #to set colum names
+
+formateAD$time <- as.numeric(gsub(",", ".", formateAD$time))
+
+formateAD_long <- formateAD %>%
+  pivot_longer(
+    cols = -time,
+    names_to = "rep_treat",
+    values_to = "value"
+  ) %>%
+  mutate(
+    replicate = substr(rep_treat, 1, 1),
+    treatment = as.integer(substr(rep_treat, 2, nchar(rep_treat)))
+  ) %>%
+  select(-rep_treat)
+
+formateAD_long <- formateAD_long %>%    #to correct for the OD600
+  mutate(value = value / 0.23)
+
+sapply(formateAD[,-1], is.numeric)
+
+formateAD_long <- formateAD_long %>%   #time in hours
+  mutate(time_h = time / 3600)
+
+data_noA <- formateAD_long %>%
+filter(replicate != "A", replicate != "H")    #removing rows A and H due to insufficient CO2 levels
+
+library(zoo)   # for rollapply
+
+window_n <- 4   # number of points per window
+
+
+
+data_rates <- data_noA %>%
+  arrange(replicate, treatment, time_h) %>%
+  group_by(replicate, treatment) %>%
+  mutate(
+    growth_rate = rollapply(
+      log(value),
+      width  = window_n,
+      align  = "right",
+      fill   = NA,
+      FUN = function(z) {
+        t1 <- first(time_h[seq_along(z)])
+        t2 <- last(time_h[seq_along(z)])
+        (last(z) - first(z)) / (t2 - t1)
+      }
+    ),
+    time_mid = rollapply(
+      time,
+      width = window_n,
+      align = "right",
+      fill = NA,
+      FUN = mean
+    )
+  ) %>%
+  filter(!is.na(growth_rate))
+
+
+ggplot(data_rates,
+       aes(x = time_mid, y = growth_rate,
+           colour = factor(treatment),
+           group = interaction(replicate, treatment))) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Time", y = "growth rate",
+       colour = "Treatment")
